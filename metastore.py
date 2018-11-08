@@ -11,6 +11,7 @@ A sample ErrorResponse class. Use this to respond to client requests when the re
 
 You can use this class as it is or come up with your own implementation.
 '''
+
 class ErrorResponse(Exception):
     def __init__(self, message):
         super(ErrorResponse, self).__init__(message)
@@ -28,25 +29,6 @@ class ErrorResponse(Exception):
         self.error_type = 3
 
 
-# class ErrorResponse:
-#     def __init__(self, message):
-#         self.error = message
-#         self.error_type = None
-#         self.missing_blocks = None
-#         self.current_version = None
-#         self.hashlist = None
-#
-#     def missing_blocks(self, hashlist):
-#         self.error_type = 1
-#         self.missing_blocks = hashlist
-#
-#     def wrong_version_error(self, version):
-#         self.error_type = 2
-#         self.current_version = version
-#
-#     def file_not_found(self):
-#         self.error_type = 3
-
 '''
 The MetadataStore RPC server class.
 
@@ -54,13 +36,14 @@ The MetadataStore process maintains the mapping of filenames to hashlists. All
 metadata is stored in memory, and no database systems or files will be used to
 maintain the data.
 '''
+
+
 class MetadataStore(rpyc.Service):
-
-
     """
         Initialize the class using the config file provided and also initialize
         any datastructures you may need.
     """
+
     def __init__(self, config):
         self.config_file = config
         self.lock = threading.Lock()
@@ -101,6 +84,7 @@ class MetadataStore(rpyc.Service):
             config_string = file.readline()
         file.close()
         return num_block, header_field, host_field, port_field
+
     '''
         ModifyFile(f,v,hl): Modifies file f so that it now contains the
         contents refered to by the hashlist hl.  The version provided, v, must
@@ -110,6 +94,7 @@ class MetadataStore(rpyc.Service):
         As per rpyc syntax, adding the prefix 'exposed_' will expose this
         method as an RPC call
     '''
+
     def exposed_modify_file(self, filename, version, hashlist):
         hashlist = list(hashlist)
         self.lock.acquire()
@@ -130,13 +115,10 @@ class MetadataStore(rpyc.Service):
                 if not self.block_connections[server_idx].root.has_block(hash):
                     missing_blocks.append(hash)
 
-            # if missing blocks exist, notify client to store missing blocks, and update metadata store
-            # as well
+            # if missing blocks exist, notify client to store missing blocks
             if len(missing_blocks) > 0:
                 error_response = ErrorResponse('Missing Blocks')
                 error_response.missing_blocks(missing_blocks)
-                self.version_map[filename] = version
-                self.hashlist_map[filename] = hashlist
                 raise error_response
 
             # if no missing blocks, update metadata store and return 'OK'
@@ -153,6 +135,7 @@ class MetadataStore(rpyc.Service):
         As per rpyc syntax, adding the prefix 'exposed_' will expose this
         method as an RPC call
     '''
+
     def exposed_delete_file(self, filename, version):
         server_version = 0
         self.lock.acquire()
@@ -166,7 +149,7 @@ class MetadataStore(rpyc.Service):
                 raise error_response
 
             self.version_map[filename] = version
-            self.hashlist_map[filename] = None
+            self.hashlist_map[filename] = []
             return 'OK'
         finally:
             self.lock.release()
@@ -179,17 +162,15 @@ class MetadataStore(rpyc.Service):
         As per rpyc syntax, adding the prefix 'exposed_' will expose this
         method as an RPC call
     '''
+
     def exposed_read_file(self, filename):
         version = 0
-        print('version', self.version_map.keys())
-        print('hash list', self.hashlist_map.keys())
         if filename in self.version_map:
-            version = self.version_map.get(filename)
-        hashlist = None
+            version = self.version_map[filename]
+        hashlist = []
         if filename in self.hashlist_map:
-            hashlist = self.hashlist_map.get(filename)
+            hashlist = self.hashlist_map[filename]
         return version, hashlist
-
 
     def find_server(self, h):
         return int(h, 16) % self.num_of_blockstores
@@ -197,6 +178,6 @@ class MetadataStore(rpyc.Service):
 
 if __name__ == '__main__':
     from rpyc.utils.server import ThreadPoolServer
-    server = ThreadPoolServer(MetadataStore(sys.argv[1]), port = 6000)
-    server.start()
 
+    server = ThreadPoolServer(MetadataStore(sys.argv[1]), port=6000)
+    server.start()

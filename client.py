@@ -1,10 +1,7 @@
-import traceback
-
 import rpyc
 import hashlib
 import os
 import sys
-from metastore import ErrorResponse
 
 """
 A client is a program that interacts with SurfStore. It is used to create,
@@ -60,20 +57,19 @@ class SurfStoreClient():
 	(and potentially the BlockStore if they were not already present there).
 	"""
 	def upload(self, filepath):
-		# real_path = os.path.realpath(filepath)
-		real_path = filepath
+		real_path = os.path.realpath(filepath)
 		# get the file name
-		if real_path.find('\\') == -1 and real_path.find('/') == -1:
+		if filepath.find('/') == -1:
 			# if no '/' present in the path, the file name is just the real_path
-			file_name = real_path
-			# print('no slash', real_path)
+			file_name = filepath
 		else:
 			# else take the last term of the real_path seperated by /
-			if real_path.find('\\') != -1:
-				file_name = real_path.split('\\')[-1]
-			else:
-				file_name = real_path.split('/')[-1]
-			# print(file_name)
+			file_name = filepath.split('/')[-1]
+
+		if not os.path.isfile(real_path):
+			print('Not Found')
+			return
+
 		# make a rpc call to the metadata.root.read_file
 		v, _ = self.meta_stub.read_file(file_name)
 
@@ -82,7 +78,7 @@ class SurfStoreClient():
 
 		while True:
 			# update version number
-			v += 1
+			v = v+1
 			try:
 				# get the hash list of the missing block
 				response = self.meta_stub.modify_file(file_name, v, hash_list)
@@ -90,70 +86,34 @@ class SurfStoreClient():
 					print('OK')
 					return
 			except rpyc.core.vinegar.GenericException as e:
-				# print(e.error)
 				if e.error_type == 1:
 					miss_block_list = list(eval(e.missing_blocks))
 					for key in miss_block_list:
 						destination = key_server_table[key]
 						block_sent = key_block_table[key]
 						self.block_stub[destination].store_block(key, block_sent)
-				# elif e.error_type == 2:
-				# 	print('error type 2: wrong version')
-				# 	return
-				# elif e.error_type == 3:
-				# 	print('error type 3: file not found')
-				# 	return
-			except Exception:
-				return
+				elif e.error_type == 2:
+					v = e.current_version
 
-		# # if response is 'OK'
-		# if response == 'OK':
-		# 	print('upload succeed')
-		# # for each hash value in the missing block list, send the file to the destination
-		# if response != 'OK':
-		# 	error_type = response.error_type
-		#
-		# 	if error_type == 1:
-		# 		miss_block_list = response.missing_blocks
-		# 		for key in miss_block_list:
-		# 			destination = key_server_table[key]
-		# 			block_sent = key_block_table[key]
-		# 			self.block_stub[destination].store_block(key, block_sent)
-		# 	elif error_type == 2:
-		# 		print('error type 2: wrong version')
-		# 		return
-		#
-		# 	elif error_type == 3:
-		# 		print('error type 3: file not found')
-		# 		return
-		# response = self.meta_stub.modify_file(file_name, new_v, hash_list)
-		# if response == 'OK':
-		# 	print('OK')
-		# else:
-		# 	print('unexpected Error in uploading file')
-		# return
 
 	"""
 	delete(filename) : Signals the MetadataStore to delete a file.
 	"""
 	def delete(self, filename):
 		v, hl = self.meta_stub.read_file(filename)
-		if hl:
-			hl = list(hl)
-		if v == 0:
+		if v == 0 or not hl:
 			print('Not Found')
 			return
-		if not hl:
-			print('Not Found')
-			return
+
 		while True:
-			v += 1
 			try:
-				self.meta_stub.delete_file(filename, v)
-				print('OK')
-				return
+				response = self.meta_stub.delete_file(filename, v+1)
+				if response == 'OK':
+					print('OK')
+					return
 			except rpyc.core.vinegar.GenericException as e:
-				pass
+				if e.error_type == 2:
+					v = e.current_version
 
 	"""
         download(filename, dst) : Downloads a file (f) from SurfStore and saves
@@ -161,17 +121,15 @@ class SurfStoreClient():
 	"""
 	def download(self, filename, location):
 		v, hl = self.meta_stub.read_file(filename)
-		# print(v, hl)
-		real_file_path = os.path.realpath(location + '/' + filename)
-		# real_file_path = location + '/' + filename
+		real_path = os.path.realpath(location)
 		if not hl:
 			print('Not Found')
 			return
 		hl = list(hl)
-
+		real_file_path = real_path + '/' + filename
 		if os.path.isfile(real_file_path):
 			# see if file already exist, if exist, download the necessary ones
-			key_block_table, key_server_table, hash_list = self.splitFile(real_file_path)
+			key_block_table, key_server_table, hash_list = self.splitFile(real_path + '/' + filename)
 			block_set = []
 			for key in hl:
 				if key in key_block_table:
